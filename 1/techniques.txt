@@ -1,0 +1,19 @@
+Shuriken (shuriken.blend):
+- boolean operations
+- proportional editing
+- mirror modifier
+
+Traffic Cone (traffic_cone.blend):
+- proportional editing
+- bevel modifier
+
+Rocket League Logo (logo.blend):
+- bezier curves
+- boolean operations
+- blueprints
+
+Wizard Hat (wizard_hat.blend):
+- proportional editing
+- lattice deformation
+- sculpting
+- geometry nodes
