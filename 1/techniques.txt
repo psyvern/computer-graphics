@@ -17,3 +17,11 @@ Wizard Hat (wizard_hat.blend):
 - lattice deformation
 - sculpting
 - geometry nodes
+
+First Tire (tire_cristianos.blend) :
+- Blueprint
+- Boolean operations
+
+Second Tire (tire_rocket_league) :
+- Blueprint
+- Boolean operations
