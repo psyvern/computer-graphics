@@ -1,0 +1,23 @@
+TabWidth: 4
+IndentWidth: 4
+PointerAlignment: Left
+SpaceAfterCStyleCast: true
+BreakBeforeTernaryOperators: true
+BreakAfterReturnType: None
+PenaltyReturnTypeOnItsOwnLine: 100000
+IndentPPDirectives: BeforeHash
+InsertTrailingCommas: Wrapped
+SpacesInContainerLiterals: true
+Cpp11BracedListStyle: Block
+AlignArrayOfStructures: Right
+
+FixNamespaceComments: false
+NamespaceIndentation: All
+
+  
+BinPackArguments: false
+BinPackParameters: false
+AllowAllParametersOfDeclarationOnNextLine: false
+AlignAfterOpenBracket: false
+BreakAfterOpenBracketFunction: true
+BreakBeforeCloseBracketFunction: true
