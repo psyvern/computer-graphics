@@ -530,9 +530,12 @@ int main() {
         }
     }
 
-    glewExperimental = true;
+    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+    if (!glfwInit()) {
+        std::cerr << "Failed to initialize GLFW" << std::endl;
+        return -1;
+    }
 
-    glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -546,6 +549,15 @@ int main() {
         return -1;
     }
     glfwMakeContextCurrent(window);
+
+    glewExperimental = GL_TRUE;
+    GLenum err = glewInit();
+    if (err != GLEW_OK) {
+        std::cerr << "GLEW error: "
+                  << glewGetErrorString(err)
+                  << std::endl;
+        return -1;
+    }
 
     glfwSwapInterval(0);
 
@@ -562,21 +574,15 @@ int main() {
               << glGetString(GL_SHADING_LANGUAGE_VERSION) << std::endl;
     std::cout << std::endl;
 
-    glewExperimental = true; // Needed in core profile
-    if (glewInit() != GLEW_OK) {
-        fprintf(stderr, "Failed to initialize GLEW\n");
-        return -1;
-    }
-
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
-    auto vertexShader = Shader::vertex(assets::shader::VERTEX);
-    auto vertexPbrShader = Shader::vertex(assets::shader::VERTEX_PBR);
-    auto fragmentShader = Shader::fragment(assets::shader::FRAGMENT);
-    auto fragment1Shader = Shader::fragment(assets::shader::FRAGMENT_1);
-    auto fragmentPbrShader = Shader::fragment(assets::shader::FRAGMENT_PBR);
-    auto vertexGuiShader = Shader::vertex(assets::shader::VERTEX_GUI);
-    auto fragmentGuiShader = Shader::fragment(assets::shader::FRAGMENT_GUI);
+    auto vertexShader = Shader::vertex(assets::shader::VERTEX, sizeof(assets::shader::VERTEX));
+    auto vertexPbrShader = Shader::vertex(assets::shader::VERTEX_PBR, sizeof(assets::shader::VERTEX_PBR));
+    auto fragmentShader = Shader::fragment(assets::shader::FRAGMENT, sizeof(assets::shader::FRAGMENT));
+    auto fragment1Shader = Shader::fragment(assets::shader::FRAGMENT_1, sizeof(assets::shader::FRAGMENT_1));
+    auto fragmentPbrShader = Shader::fragment(assets::shader::FRAGMENT_PBR, sizeof(assets::shader::FRAGMENT_PBR));
+    auto vertexGuiShader = Shader::vertex(assets::shader::VERTEX_GUI, sizeof(assets::shader::VERTEX_GUI));
+    auto fragmentGuiShader = Shader::fragment(assets::shader::FRAGMENT_GUI, sizeof(assets::shader::FRAGMENT_GUI));
 
     GameState state = {
         .pbrShaderProgram =

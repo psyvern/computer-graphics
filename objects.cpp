@@ -168,10 +168,11 @@ class VBO {
 
 class Shader {
   public:
-    static Shader create(i32 type, const char* string) {
+    static Shader create(i32 type, const char* string, size_t length) {
         u32 id = glCreateShader(type);
+        GLint source_length = static_cast<GLint>(length);
 
-        glShaderSource(id, 1, &string, NULL);
+        glShaderSource(id, 1, &string, &source_length);
         glCompileShader(id);
 
         i32 result;
@@ -189,12 +190,12 @@ class Shader {
         return Shader(id);
     }
 
-    static Shader vertex(const char* string) {
-        return create(GL_VERTEX_SHADER, string);
+    static Shader vertex(const char* string, size_t length) {
+        return create(GL_VERTEX_SHADER, string, length);
     }
 
-    static Shader fragment(const char* string) {
-        return create(GL_FRAGMENT_SHADER, string);
+    static Shader fragment(const char* string, size_t length) {
+        return create(GL_FRAGMENT_SHADER, string, length);
     }
 
     DELETE_FUNCS(Shader, glDeleteShader, "shader")
