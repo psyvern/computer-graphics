@@ -190,6 +190,10 @@ class Shader {
         return Shader(id);
     }
 
+    static Shader vertex(std::string string) {
+        return create(GL_VERTEX_SHADER, string.c_str(), string.length());
+    }
+
     static Shader vertex(const char* string, size_t length) {
         return create(GL_VERTEX_SHADER, string, length);
     }

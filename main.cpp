@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <cstdlib>
 #include <numbers>
+#include <ranges>
 #define GLM_ENABLE_EXPERIMENTAL
 #define STB_IMAGE_IMPLEMENTATION
 
@@ -14,7 +16,6 @@
 #include <assimp/scene.h>
 #include <cmath>
 #include <cstddef>
-#include <cstdio>
 #include <format>
 #include <glm/common.hpp>
 #include <glm/ext/matrix_clip_space.hpp>
@@ -34,13 +35,31 @@
 #include <glm/gtx/string_cast.hpp>
 #include <glm/matrix.hpp>
 #include <glm/trigonometric.hpp>
-#include <iostream>
 #include <math.h>
-#include <ostream>
+#include <print>
 #include <time.h>
 #include <vector>
 
 using std::numbers::pi;
+
+template <glm::length_t L, typename T, glm::qualifier Q>
+struct std::formatter<glm::vec<L, T, Q>> : std::formatter<T> {
+    template <typename FormatContext>
+    auto format(const glm::vec<L, T, Q>& v, FormatContext& ctx) const {
+        auto out = ctx.out();
+        *out++ = '(';
+        for (glm::length_t i = 0; i < L; ++i) {
+            if (i > 0) {
+                *out++ = ',';
+                *out++ = ' ';
+            }
+            ctx.advance_to(out);
+            out = std::formatter<T>::format(v[i], ctx);
+        }
+        *out++ = ')';
+        return out;
+    }
+};
 
 class Particle {
   public:
@@ -351,6 +370,16 @@ class Color {
     }
 };
 
+struct Vertex {
+    glm::vec3 position;
+    glm::vec3 normal;
+};
+
+struct Terrain {
+    std::vector<glm::vec3> original;
+    std::vector<std::vector<Vertex>> rows;
+};
+
 auto camera = Camera();
 auto car = Car();
 
@@ -374,6 +403,8 @@ class GameState {
     ShaderProgram shaderProgramOrange;
     ShaderProgram shaderProgramYellow;
     ShaderProgram guiShader;
+
+    Terrain terrain;
 
     VAO VAOs[2] = { VAO::empty(), VAO::empty() };
     VAO gui_vao = VAO::empty();
@@ -515,7 +546,117 @@ class GameState {
 void render(GameState* state);
 void update(GLFWwindow* window, GameState* state);
 
+template <glm::length_t L>
+glm::vec<L, float, glm::defaultp> bezier(
+    std::vector<glm::vec<L, float, glm::defaultp>>* points,
+    float t
+) {
+    if (points->size() == 1)
+        return points->front();
+
+    std::vector<glm::vec<L, float, glm::defaultp>> next = {};
+    next.reserve(points->size() - 1);
+
+    for (int i = 1; i < points->size(); i++) {
+        auto a = points->at(i - 1);
+        auto b = points->at(i);
+
+        next.push_back((b - a) * t + a);
+    }
+
+    return bezier(&next, t);
+}
+
+template <glm::length_t L>
+glm::vec<L, float, glm::defaultp> bezier_derivative(
+    std::vector<glm::vec<L, float, glm::defaultp>>* points,
+    float t
+) {
+    if (points->size() == 2)
+        return points->at(1) - points->at(0);
+
+    std::vector<glm::vec<L, float, glm::defaultp>> next = {};
+    next.reserve(points->size() - 1);
+
+    for (int i = 1; i < points->size(); i++) {
+        auto a = points->at(i - 1);
+        auto b = points->at(i);
+
+        next.push_back((b - a) * t + a);
+    }
+
+    return bezier_derivative(&next, t);
+}
+
+Terrain build_terrain(
+    std::vector<glm::vec3> path,
+    std::vector<glm::vec2> shape,
+    size_t resolution
+) {
+    std::vector<Vertex> shape_points = {};
+    std::vector<std::vector<Vertex>> result = {};
+
+    for (size_t i = 0; i <= resolution; i++) {
+        auto point =
+            glm::vec3(bezier(&shape, ((float) i) / (float) resolution), 0);
+
+        auto point_der = glm::vec3(
+            bezier_derivative(&shape, ((float) i) / (float) resolution), 0
+        );
+
+        shape_points.push_back(
+            {
+                point,
+                glm::normalize(glm::cross(point_der, glm::vec3(0, 0, -1))),
+            }
+        );
+    }
+
+    for (size_t i = 0; i <= resolution; i++) {
+        auto origin = bezier(&path, ((float) i) / (float) resolution);
+        auto forward =
+            bezier_derivative(&path, ((float) i) / (float) resolution);
+
+        std::vector<Vertex> rs = {};
+        for (auto point : shape_points) {
+            auto t = glm::translate(glm::mat4(1), origin);
+            auto r = glm::toMat4(
+                glm::rotation(glm::vec3(0, 0, -1), glm::normalize(forward))
+            );
+
+            auto new_point = glm::vec3(t * r * glm::vec4(point.position, 1));
+            auto new_norm = glm::vec3(r * glm::vec4(point.normal, 1));
+            std::println("{:.03f}, {:.03f}", new_point, new_norm);
+            rs.push_back({ new_point, new_norm });
+        }
+        result.push_back(rs);
+
+        std::println();
+    }
+
+    return { path, result };
+}
+
 int main() {
+    std::vector<glm::vec3> path = {
+        {  0.0, 0.0,  0.0 },
+        {  0.0, 0.0, 20.0 },
+        { 20.0, 0.0, 20.0 },
+    };
+    std::vector<glm::vec2> shape = {
+        { -10.0,  5.0 },
+        {   0.0, -5.0 },
+        {  10.0,  5.0 },
+    };
+
+    auto terrain = build_terrain(path, shape, 10);
+
+    // for (int i = 0; i <= 10; i++) {
+    //     auto point = bezier(&shape, ((float) i) / 10.0f);
+    //     auto der = bezier_derivative(&shape, ((float) i) / 10.0f);
+    //     std::println("{}: {} ({})", i, point, der);
+    // }
+
     u8 TEXTURE[27 * 4] = { 0 };
     u32 i = 0;
     for (u32 r = 0; r < 3; r++) {
@@ -532,7 +673,7 @@ int main() {
 
     glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
     if (!glfwInit()) {
-        std::cerr << "Failed to initialize GLFW" << std::endl;
+        std::println(stderr, "Failed to initialize GLFW");
         return -1;
     }
 
@@ -544,7 +685,7 @@ int main() {
         window_width, window_height, "LearnOpenGL", NULL, NULL
     );
     if (window == NULL) {
-        std::cout << "Failed to create GLFW window" << std::endl;
+        std::println("Failed to create GLFW window");
         glfwTerminate();
         return -1;
     }
@@ -553,9 +694,7 @@ int main() {
     glewExperimental = GL_TRUE;
     GLenum err = glewInit();
     if (err != GLEW_OK) {
-        std::cerr << "GLEW error: "
-                  << glewGetErrorString(err)
-                  << std::endl;
+        std::println(stderr, "GLEW error: {}", (char*) glewGetErrorString(err));
         return -1;
     }
 
@@ -566,23 +705,37 @@ int main() {
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
 
-    std::cout << "" << std::endl;
-    std::cout << "OpenGL Vendor: " << glGetString(GL_VENDOR) << std::endl;
-    std::cout << "OpenGL Renderer: " << glGetString(GL_RENDERER) << std::endl;
-    std::cout << "OpenGL Version: " << glGetString(GL_VERSION) << std::endl;
-    std::cout << "OpenGL Shading Language Version: "
-              << glGetString(GL_SHADING_LANGUAGE_VERSION) << std::endl;
-    std::cout << std::endl;
+    std::println();
+    std::println("OpenGL Vendor: {}", (char*) glGetString(GL_VENDOR));
+    std::println("OpenGL Renderer: {}", (char*) glGetString(GL_RENDERER));
+    std::println("OpenGL Version: {}", (char*) glGetString(GL_VERSION));
+    std::println(
+        "OpenGL Shading Language Version: {}",
+        (char*) glGetString(GL_SHADING_LANGUAGE_VERSION)
+    );
+    std::println();
 
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
-    auto vertexShader = Shader::vertex(assets::shader::VERTEX, sizeof(assets::shader::VERTEX));
-    auto vertexPbrShader = Shader::vertex(assets::shader::VERTEX_PBR, sizeof(assets::shader::VERTEX_PBR));
-    auto fragmentShader = Shader::fragment(assets::shader::FRAGMENT, sizeof(assets::shader::FRAGMENT));
-    auto fragment1Shader = Shader::fragment(assets::shader::FRAGMENT_1, sizeof(assets::shader::FRAGMENT_1));
-    auto fragmentPbrShader = Shader::fragment(assets::shader::FRAGMENT_PBR, sizeof(assets::shader::FRAGMENT_PBR));
-    auto vertexGuiShader = Shader::vertex(assets::shader::VERTEX_GUI, sizeof(assets::shader::VERTEX_GUI));
-    auto fragmentGuiShader = Shader::fragment(assets::shader::FRAGMENT_GUI, sizeof(assets::shader::FRAGMENT_GUI));
+    auto vertexShader = Shader::vertex(assets::shader::VERTEX);
+    auto vertexPbrShader = Shader::vertex(
+        assets::shader::VERTEX_PBR, sizeof(assets::shader::VERTEX_PBR)
+    );
+    auto fragmentShader = Shader::fragment(
+        assets::shader::FRAGMENT, sizeof(assets::shader::FRAGMENT)
+    );
+    auto fragment1Shader = Shader::fragment(
+        assets::shader::FRAGMENT_1, sizeof(assets::shader::FRAGMENT_1)
+    );
+    auto fragmentPbrShader = Shader::fragment(
+        assets::shader::FRAGMENT_PBR, sizeof(assets::shader::FRAGMENT_PBR)
+    );
+    auto vertexGuiShader = Shader::vertex(
+        assets::shader::VERTEX_GUI, sizeof(assets::shader::VERTEX_GUI)
+    );
+    auto fragmentGuiShader = Shader::fragment(
+        assets::shader::FRAGMENT_GUI, sizeof(assets::shader::FRAGMENT_GUI)
+    );
 
     GameState state = {
         .pbrShaderProgram =
@@ -609,6 +762,8 @@ int main() {
 
     state.shaderProgramOrange.uniform("MVP", glm::mat4(1));
     state.guiShader.uniform("color", glm::vec4(1));
+
+    state.terrain = terrain;
 
     state.VAOs[0] = VAO::gen();
     state.VAOs[0].enableAttributeArray(0);
@@ -791,6 +946,52 @@ void drawRect(
     glDepthMask(true);
 }
 
+float plane_point_distance(Vertex plane, glm::vec3 point) {
+    return glm::dot(plane.normal, (point - plane.position));
+}
+
+float find_position(Terrain terrain, glm::vec3 position) {
+    auto a = 0.0f;
+    auto b = 1.0f;
+
+    while (true) {
+        auto position_a = bezier(&terrain.original, a);
+        auto normal_a = glm::normalize(bezier_derivative(&terrain.original, a));
+
+        auto position_b = bezier(&terrain.original, b);
+        auto normal_b = glm::normalize(bezier_derivative(&terrain.original, b));
+
+        auto distance_a =
+            plane_point_distance({ position_a, normal_a }, position);
+
+        auto distance_b =
+            -plane_point_distance({ position_b, normal_b }, position);
+
+        // std::println("a: {}, {}", a, distance_a);
+        // std::println("b: {}, {}", b, distance_b);
+
+        if (distance_a <= 0 && distance_b > 0) {
+            return a;
+        }
+
+        if (distance_b <= 0 && distance_a > 0) {
+            return b;
+        }
+
+        auto middle = (a + b) / 2.0f;
+
+        if (abs(distance_a - distance_b) < 1e-5) {
+            return middle;
+        }
+
+        if (distance_a < distance_b) {
+            b = middle;
+        } else {
+            a = middle;
+        }
+    }
+}
+
 void render(GameState* state) {
     auto projection = glm::perspective(
         glm::radians(70.0f), (float) window_width / window_height, 0.1f, 100.0f
@@ -886,6 +1087,48 @@ void render(GameState* state) {
         state->wheel_mesh.draw(&state->pbrVBO);
     }
 
+    std::vector<u32> indices = {};
+    std::vector<float> dataa = {};
+    for (auto row : state->terrain.rows) {
+        for (auto [i, vertex] : row | std::views::enumerate) {
+            dataa.push_back(vertex.position.x);
+            dataa.push_back(vertex.position.y);
+            dataa.push_back(vertex.position.z);
+            dataa.push_back(vertex.normal.x + (i == 5));
+            dataa.push_back(vertex.normal.y + (i == 5));
+            dataa.push_back(vertex.normal.z + (i == 5));
+            dataa.push_back(0.0f);
+            dataa.push_back(0.0f);
+            dataa.push_back(vertex.normal.x);
+            dataa.push_back(vertex.normal.y);
+            dataa.push_back(vertex.normal.z);
+        }
+    }
+
+    for (auto i = 1; i < 11; i++) {
+        for (auto j = 1; j < 11; j++) {
+            auto x1 = (i - 1) * 11;
+            auto x2 = i * 11;
+            auto y1 = j - 1;
+            auto y2 = j;
+            indices.push_back(x1 + y1);
+            indices.push_back(x1 + y2);
+            indices.push_back(x2 + y2);
+            indices.push_back(x1 + y1);
+            indices.push_back(x2 + y2);
+            indices.push_back(x2 + y1);
+        }
+    }
+
+    glPointSize(5);
+    state->pbrShaderProgram.uniform("MVP", projection * view);
+    state->pbrVBO.data(&dataa, GL_STATIC_DRAW);
+    glDrawElements(
+        GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, indices.data()
+    );
+
+    std::println("{}", find_position(state->terrain, car.position));
+
     drawRect(state, 1, 1, 2 + 12 + 9 * 8 + 1, 2 + 3 * 8 + 1, 0x5F000000);
 
     state->drawString("X", 2, 2, 0xFFFF3F3F);
@@ -970,12 +1213,12 @@ class Controls {
 
                 auto buttons = glfwGetJoystickButtons(i, &count);
                 for (int j = 0; j < count; j++) {
-                    printf("button %d = %d\n", j, buttons[j]);
+                    std::println("button {} = {}", j, buttons[j]);
                 }
 
                 auto axes = glfwGetJoystickAxes(i, &count);
                 for (int j = 0; j < count; j++) {
-                    printf("axis %d = %f\n", j, axes[j]);
+                    std::println("axis {} = {}", j, axes[j]);
                 }
 
                 result.jump = buttons[0];

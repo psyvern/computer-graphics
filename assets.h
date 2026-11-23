@@ -1,8 +1,9 @@
 #include "types.h"
+#include <string>
 
 namespace assets {
     namespace shader {
-        const char VERTEX[] = {
+        const std::string VERTEX = {
 #embed "vertex.glsl"
         };
 
