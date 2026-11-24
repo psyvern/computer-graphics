@@ -13,7 +13,6 @@ using glm::vec2, glm::vec3, glm::vec4, glm::quat, glm::mat4;
 struct FindVertexResult {
     float t;
     float s;
-    mat4 transform;
     float distance;
     vec3 position;
     vec3 up;
@@ -152,11 +151,12 @@ struct Track {
     }
 
     FindVertexResult find_vertex(vec3 position) {
-        auto [t, _] = path.closestPoint(position, 64);
+        auto t = path.closestPoint(position, 64);
         auto [t_position, t_normal] = path.sample(t);
 
         auto r = glm::toMat4(glm::rotation(t_normal, vec3(0, 0, -1)));
 
+        auto original_position = position;
         position =
             vec3(r * glm::translate(mat4(1), -t_position) * vec4(position, 1));
 
@@ -166,8 +166,7 @@ struct Track {
             std::ranges::to<std::vector>()
         };
 
-        auto [s, distance] = shape.closestPoint(position, 64);
-        // std::println("distance = {}", distance);
+        auto s = shape.closestPoint(position, 64);
 
         auto [s_position, s_normal] = shape.sample(s);
 
@@ -176,12 +175,12 @@ struct Track {
         auto r_1 = glm::rotation(vec3(0, 0, -1), t_normal);
         auto r_2 = glm::rotation(vec3(1, 0, 0), s_normal);
 
-        auto s_1 = glm::scale(mat4(1), vec3(0.1));
-
-        auto final_mat = t_1 * glm::toMat4(r_1) * t_2 * glm::toMat4(r_2) * s_1;
+        auto transform = t_1 * glm::toMat4(r_1) * t_2 * glm::toMat4(r_2);
         auto up = r_1 * r_2 * vec3(0, 1, 0);
-        auto final_position = vec3(final_mat * vec4(0, 0, 0, 1));
+        auto final_position = vec3(transform * vec4(0, 0, 0, 1));
 
-        return { t, s, final_mat, distance, final_position, up };
+        auto distance = glm::dot(up, original_position - final_position);
+
+        return { t, s, distance, final_position, up };
     }
 };

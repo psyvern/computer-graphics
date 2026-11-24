@@ -243,8 +243,7 @@ class Car {
         Track track
     ) {
         auto road = track.find_vertex(this->position);
-        auto on_floor = road.distance < 1e-5f;
-        on_floor = true;
+        auto on_floor = road.distance < 1e-3f;
 
         auto max_speed = (float) (fast * 3 + 1);
 
@@ -273,10 +272,6 @@ class Car {
             }
         }
 
-        orientation = offsetOrientation(orientation, vec3(0, 1, 0), yaw);
-        orientation = offsetOrientation(orientation, vec3(1, 0, 0), pitch);
-        orientation = offsetOrientation(orientation, vec3(0, 0, 1), roll);
-
         if (on_floor) {
             auto front = this->orientation * vec3(0, 0, -1);
             speed += max_speed * vertical * 0.1f * front;
@@ -288,48 +283,54 @@ class Car {
             }
         }
 
-        // if (space) {
-        //     if (on_floor && !space_last_pressed) {
-        //         speed.y = 0.25f;
-        //     } else {
-        //         auto right = glm::cross(front, { 0, 1, 0 });
+        auto front = this->front();
 
-        //         if (jump_state == 1 && !space_last_pressed) {
-        //             rotation_speed = vec2(-horizontal, -vertical);
-        //             if (rotation_speed != vec2(0)) {
-        //                 jump_state = -FLIP_TIME;
-        //                 rotation_speed = glm::normalize(rotation_speed);
-        //                 speed = front * (vertical * 0.3f) +
-        //                         right * (horizontal * 0.3f);
-        //             } else {
-        //                 auto up = orientation * vec3(0, 1, 0);
-        //                 speed = up * 0.25f;
-        //             }
-        //         }
-        //     }
-        // }
+        if (space) {
+            if (on_floor && !space_last_pressed) {
+                speed += this->orientation * vec3(0, 1, 0) * 0.25f;
+                on_floor = false;
+            } else {
+                auto right = glm::cross(front, { 0, 1, 0 });
 
-        // space_last_pressed = space;
+                if (jump_state == 1 && !space_last_pressed) {
+                    rotation_speed = vec2(-horizontal, -vertical);
+                    if (rotation_speed != vec2(0)) {
+                        jump_state = -FLIP_TIME;
+                        rotation_speed = glm::normalize(rotation_speed);
+                        speed = front * (vertical * 0.3f) +
+                                right * (horizontal * 0.3f);
+                    } else {
+                        auto up = orientation * vec3(0, 1, 0);
+                        speed = up * 0.25f;
+                    }
+                }
+            }
+        }
 
-        // if (jump_state < 0) {
-        //     roll += 2.0f * pi / FLIP_TIME * rotation_speed.x;
-        //     pitch += 2.0f * pi / FLIP_TIME * rotation_speed.y;
-        //     jump_state += 1;
+        space_last_pressed = space;
 
-        //     if (jump_state == 0)
-        //         rotation_speed = glm::vec2(0);
-        // } else {
-        //     speed.y -= 0.01f;
-        // }
+        if (jump_state < 0) {
+            roll += 2.0f * pi / FLIP_TIME * rotation_speed.x;
+            pitch += 2.0f * pi / FLIP_TIME * rotation_speed.y;
+            jump_state += 1;
 
-        // roll += rotation_speed.x;
-        // pitch += rotation_speed.y;
+            if (jump_state == 0)
+                rotation_speed = glm::vec2(0);
+        } else {
+            if (!on_floor)
+                speed.y -= 0.01f;
+        }
+
+        orientation = offsetOrientation(orientation, vec3(0, 1, 0), yaw);
+        orientation = offsetOrientation(orientation, vec3(1, 0, 0), pitch);
+        orientation = offsetOrientation(orientation, vec3(0, 0, 1), roll);
+
         position += speed;
-        speed = vec3(0);
-        // position.y = 1;
 
         road = track.find_vertex(this->position);
-        // on_floor = road.distance < 1e-5f;
+
+        // prevent going airborne while crossing a hill without actually jumping
+        on_floor = on_floor || road.distance < 1e-3f;
 
         if (on_floor) {
             // auto forward = this->front();
@@ -339,19 +340,10 @@ class Car {
 
             this->position = road.position;
             this->orientation = glm::quatLookAt(forward, road.up);
+            this->speed = vec3(0);
+            rotation_speed = vec2(0);
+            jump_state = 1;
         }
-
-        // if (position.y <= 0.0f) {
-        //     position.y = 0;
-
-        //     roll = 0;
-        //     pitch = 0;
-        //     orientation = glm::angleAxis(this->yaw(), glm::vec3(0, 1, 0));
-
-        //     speed = glm::vec3(0);
-        //     rotation_speed = glm::vec2(0);
-        //     jump_state = 1;
-        // }
     }
 };
 
@@ -552,7 +544,7 @@ int main() {
         {  10.0,  5.0 },
     };
 
-    auto track = Track::build({ path }, { shape }, 100, 16);
+    auto track = Track::build({ path }, { shape }, 100, 32);
 
     u8 TEXTURE[27 * 4] = { 0 };
     u32 i = 0;
@@ -902,7 +894,7 @@ void render(GameState* state) {
     auto road = state->track.find_vertex(car.position);
 
     transform = {
-        car.position + road.up * 0.15f,
+        car.position,
         car.scale,
         car.orientation,
     };

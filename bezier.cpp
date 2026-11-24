@@ -22,16 +22,10 @@ template <glm::length_t L> class Bezier {
     // derivative
     Vertex<L> sample(float t) { return sample_internal(&this->points, t); }
 
-    // Returns
-    // - the parameter `t`
-    // - the squared distance
-    std::tuple<float, float> closestPoint(
-        glm::vec3 position,
-        u32 scans = 25,
-        float ε = 1e-4
-    ) {
+    float closestPoint(glm::vec3 position, u32 scans = 25, float ε = 1e-4) {
         int mindex;
-        for (float min = INFINITY, i = scans + 1; i--;) {
+        float min = INFINITY;
+        for (int i = 0; i <= scans; i++) {
             auto d2 =
                 glm::distance2(position, this->value(((float) i) / scans));
             if (d2 < min) {
@@ -46,8 +40,8 @@ template <glm::length_t L> class Bezier {
         float d;
         while ((n - m) > ε) {
             k = (n + m) / 2;
-            auto d1 = glm::distance2(position, value(k - ε));
-            auto d2 = glm::distance2(position, value(k + ε));
+            auto d1 = glm::distance2(position, this->value(k - ε));
+            auto d2 = glm::distance2(position, this->value(k + ε));
 
             if (d1 < d2) {
                 n = k;
@@ -57,7 +51,8 @@ template <glm::length_t L> class Bezier {
                 d = d2;
             }
         }
-        return { k, d };
+
+        return k;
     }
 
   private:
