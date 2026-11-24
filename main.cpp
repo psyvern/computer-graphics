@@ -1,13 +1,15 @@
 #include <algorithm>
 #include <cstdlib>
 #include <numbers>
-#include <ranges>
 #define GLM_ENABLE_EXPERIMENTAL
 #define STB_IMAGE_IMPLEMENTATION
 
 #include "assets.h"
+#include "bezier.cpp"
 #include "font.cpp"
+#include "glm_format.cpp"
 #include "objects.cpp"
+#include "track.cpp"
 #include "types.h"
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -29,7 +31,6 @@
 #include <glm/geometric.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtx/string_cast.hpp>
@@ -40,31 +41,13 @@
 #include <time.h>
 #include <vector>
 
+using glm::vec2, glm::vec3, glm::vec4, glm::quat, glm::mat4;
 using std::numbers::pi;
-
-template <glm::length_t L, typename T, glm::qualifier Q>
-struct std::formatter<glm::vec<L, T, Q>> : std::formatter<T> {
-    template <typename FormatContext>
-    auto format(const glm::vec<L, T, Q>& v, FormatContext& ctx) const {
-        auto out = ctx.out();
-        *out++ = '(';
-        for (glm::length_t i = 0; i < L; ++i) {
-            if (i > 0) {
-                *out++ = ',';
-                *out++ = ' ';
-            }
-            ctx.advance_to(out);
-            out = std::formatter<T>::format(v[i], ctx);
-        }
-        *out++ = ')';
-        return out;
-    }
-};
 
 class Particle {
   public:
-    glm::vec3 position;
-    glm::vec3 scale;
+    vec3 position;
+    vec3 scale;
     u32 lifetime;
 };
 
@@ -133,18 +116,16 @@ u32 window_height = 600;
 class Camera {
   public:
     float speed = 0.05f;
-    glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+    vec3 up = vec3(0.0f, 1.0f, 0.0f);
 
     f32 pitch = 0.0f;
     float yaw = 0.0f;
 
-    glm::vec3 position = glm::vec3(0);
-    glm::vec3 target = glm::vec3(0);
-    glm::vec3 front = glm::vec3(1);
+    vec3 position = vec3(0);
+    vec3 target = vec3(0);
+    vec3 front = vec3(1);
 
-    glm::mat4 viewMatrix() {
-        return glm::lookAt(position, position + front, up);
-    }
+    mat4 viewMatrix() { return glm::lookAt(position, position + front, up); }
 
     void move(
         bool forward,
@@ -225,38 +206,47 @@ glm::quat offsetOrientation(
 
 class Car {
   public:
-    glm::vec3 position = glm::vec3(0, 0, 0);
-    glm::vec3 scale = glm::vec3(0.1);
+    vec3 position = vec3(0, 0, 0);
+    vec3 scale = vec3(0.1);
 
-    glm::quat orientation = glm::quat();
+    quat orientation = quat();
 
-    glm::vec3 speed = glm::vec3(0);
-    glm::vec2 rotation_speed = glm::vec2(0);
+    vec3 speed = vec3(0);
+    vec2 rotation_speed = vec2(0);
 
     bool space_last_pressed = false;
     i32 jump_state = 1;
     float wheel_direction = 0;
 
-    glm::vec3 front() {
+    vec3 front() {
         // return glm::vec3(-sin(yaw), 0, -cos(yaw));
-        auto front = orientation * glm::vec3(0, 0, -1);
+        auto front = orientation * vec3(0, 0, -1);
         front.y = 0;
         return glm::normalize(front);
     }
 
     float yaw() {
         auto front = this->front();
-        auto forward = glm::vec3(0, 0, -1);
-        auto up = glm::vec3(0, 1, 0);
+        auto forward = vec3(0, 0, -1);
+        auto up = vec3(0, 1, 0);
 
         return atan2(
             glm::dot(glm::cross(forward, front), up), glm::dot(forward, front)
         );
     }
 
-    void move(float vertical, float horizontal, bool space, bool fast) {
+    void move(
+        float vertical,
+        float horizontal,
+        bool space,
+        bool fast,
+        Track track
+    ) {
+        auto road = track.find_vertex(this->position);
+        auto on_floor = road.distance < 1e-5f;
+        on_floor = true;
+
         auto max_speed = (float) (fast * 3 + 1);
-        auto on_floor = position.y <= 0.0f;
 
         if (on_floor) {
             wheel_direction = horizontal;
@@ -270,7 +260,7 @@ class Car {
 
         const float FLIP_TIME = 30.0f;
 
-        if (rotation_speed == glm::vec2(0)) {
+        if (rotation_speed == vec2(0)) {
             if (on_floor)
                 yaw -= glm::radians(horizontal * 3.0f * vertical);
             else {
@@ -283,11 +273,14 @@ class Car {
             }
         }
 
-        auto front = this->front();
+        orientation = offsetOrientation(orientation, vec3(0, 1, 0), yaw);
+        orientation = offsetOrientation(orientation, vec3(1, 0, 0), pitch);
+        orientation = offsetOrientation(orientation, vec3(0, 0, 1), roll);
 
         if (on_floor) {
+            auto front = this->orientation * vec3(0, 0, -1);
             speed += max_speed * vertical * 0.1f * front;
-            auto speed_horizontal = glm::vec2(speed.x, speed.z);
+            auto speed_horizontal = vec2(speed.x, speed.z);
             if (glm::length(speed_horizontal) > max_speed) {
                 speed_horizontal = glm::normalize(speed_horizontal) * max_speed;
                 speed.x = speed_horizontal.x;
@@ -295,65 +288,70 @@ class Car {
             }
         }
 
-        if (space) {
-            if (on_floor && !space_last_pressed) {
-                speed.y = 0.25f;
-            } else {
-                auto right = glm::cross(front, { 0, 1, 0 });
+        // if (space) {
+        //     if (on_floor && !space_last_pressed) {
+        //         speed.y = 0.25f;
+        //     } else {
+        //         auto right = glm::cross(front, { 0, 1, 0 });
 
-                if (jump_state == 1 && !space_last_pressed) {
-                    rotation_speed = glm::vec2(-horizontal, -vertical);
-                    if (rotation_speed != glm::vec2(0)) {
-                        jump_state = -FLIP_TIME;
-                        rotation_speed = glm::normalize(rotation_speed);
-                        speed = front * (vertical * 0.3f) +
-                                right * (horizontal * 0.3f);
-                    } else {
-                        auto up = orientation * glm::vec3(0, 1, 0);
-                        speed = up * 0.25f;
-                    }
-                }
-            }
-        }
+        //         if (jump_state == 1 && !space_last_pressed) {
+        //             rotation_speed = vec2(-horizontal, -vertical);
+        //             if (rotation_speed != vec2(0)) {
+        //                 jump_state = -FLIP_TIME;
+        //                 rotation_speed = glm::normalize(rotation_speed);
+        //                 speed = front * (vertical * 0.3f) +
+        //                         right * (horizontal * 0.3f);
+        //             } else {
+        //                 auto up = orientation * vec3(0, 1, 0);
+        //                 speed = up * 0.25f;
+        //             }
+        //         }
+        //     }
+        // }
 
-        space_last_pressed = space;
+        // space_last_pressed = space;
 
-        if (jump_state < 0) {
-            roll += 2.0f * pi / FLIP_TIME * rotation_speed.x;
-            pitch += 2.0f * pi / FLIP_TIME * rotation_speed.y;
-            jump_state += 1;
+        // if (jump_state < 0) {
+        //     roll += 2.0f * pi / FLIP_TIME * rotation_speed.x;
+        //     pitch += 2.0f * pi / FLIP_TIME * rotation_speed.y;
+        //     jump_state += 1;
 
-            if (jump_state == 0)
-                rotation_speed = glm::vec2(0);
-        } else {
-            speed.y -= 0.01f;
-        }
+        //     if (jump_state == 0)
+        //         rotation_speed = glm::vec2(0);
+        // } else {
+        //     speed.y -= 0.01f;
+        // }
 
         // roll += rotation_speed.x;
         // pitch += rotation_speed.y;
         position += speed;
+        speed = vec3(0);
         // position.y = 1;
 
-        front = this->front();
+        road = track.find_vertex(this->position);
+        // on_floor = road.distance < 1e-5f;
 
-        if (position.y <= 0.0f) {
-            position.y = 0;
+        if (on_floor) {
+            // auto forward = this->front();
+            auto forward = this->orientation * vec3(0, 0, -1);
+            auto left = glm::cross(road.up, forward);
+            forward = glm::cross(left, road.up);
 
-            roll = 0;
-            pitch = 0;
-            orientation = glm::angleAxis(this->yaw(), glm::vec3(0, 1, 0));
-
-            speed = glm::vec3(0);
-            rotation_speed = glm::vec2(0);
-            jump_state = 1;
+            this->position = road.position;
+            this->orientation = glm::quatLookAt(forward, road.up);
         }
 
-        orientation =
-            offsetOrientation(orientation, glm::vec3(0, 1, 0), yaw, true);
-        orientation =
-            offsetOrientation(orientation, glm::vec3(1, 0, 0), pitch, true);
-        orientation =
-            offsetOrientation(orientation, glm::vec3(0, 0, 1), roll, true);
+        // if (position.y <= 0.0f) {
+        //     position.y = 0;
+
+        //     roll = 0;
+        //     pitch = 0;
+        //     orientation = glm::angleAxis(this->yaw(), glm::vec3(0, 1, 0));
+
+        //     speed = glm::vec3(0);
+        //     rotation_speed = glm::vec2(0);
+        //     jump_state = 1;
+        // }
     }
 };
 
@@ -368,16 +366,6 @@ class Color {
             ((argb >> 0) & 0xFF) / 256.0f,
             ((argb >> 24) & 0xFF) / 256.0f };
     }
-};
-
-struct Vertex {
-    glm::vec3 position;
-    glm::vec3 normal;
-};
-
-struct Terrain {
-    std::vector<glm::vec3> original;
-    std::vector<std::vector<Vertex>> rows;
 };
 
 auto camera = Camera();
@@ -404,7 +392,7 @@ class GameState {
     ShaderProgram shaderProgramYellow;
     ShaderProgram guiShader;
 
-    Terrain terrain;
+    Track track;
 
     VAO VAOs[2] = { VAO::empty(), VAO::empty() };
     VAO gui_vao = VAO::empty();
@@ -546,102 +534,17 @@ class GameState {
 void render(GameState* state);
 void update(GLFWwindow* window, GameState* state);
 
-template <glm::length_t L>
-glm::vec<L, float, glm::defaultp> bezier(
-    std::vector<glm::vec<L, float, glm::defaultp>>* points,
-    float t
-) {
-    if (points->size() == 1)
-        return points->front();
-
-    std::vector<glm::vec<L, float, glm::defaultp>> next = {};
-    next.reserve(points->size() - 1);
-
-    for (int i = 1; i < points->size(); i++) {
-        auto a = points->at(i - 1);
-        auto b = points->at(i);
-
-        next.push_back((b - a) * t + a);
-    }
-
-    return bezier(&next, t);
-}
-
-template <glm::length_t L>
-glm::vec<L, float, glm::defaultp> bezier_derivative(
-    std::vector<glm::vec<L, float, glm::defaultp>>* points,
-    float t
-) {
-    if (points->size() == 2)
-        return points->at(1) - points->at(0);
-
-    std::vector<glm::vec<L, float, glm::defaultp>> next = {};
-    next.reserve(points->size() - 1);
-
-    for (int i = 1; i < points->size(); i++) {
-        auto a = points->at(i - 1);
-        auto b = points->at(i);
-
-        next.push_back((b - a) * t + a);
-    }
-
-    return bezier_derivative(&next, t);
-}
-
-Terrain build_terrain(
-    std::vector<glm::vec3> path,
-    std::vector<glm::vec2> shape,
-    size_t resolution
-) {
-    std::vector<Vertex> shape_points = {};
-    std::vector<std::vector<Vertex>> result = {};
-
-    for (size_t i = 0; i <= resolution; i++) {
-        auto point =
-            glm::vec3(bezier(&shape, ((float) i) / (float) resolution), 0);
-
-        auto point_der = glm::vec3(
-            bezier_derivative(&shape, ((float) i) / (float) resolution), 0
-        );
-
-        shape_points.push_back(
-            {
-                point,
-                glm::normalize(glm::cross(point_der, glm::vec3(0, 0, -1))),
-            }
-        );
-    }
-
-    for (size_t i = 0; i <= resolution; i++) {
-        auto origin = bezier(&path, ((float) i) / (float) resolution);
-        auto forward =
-            bezier_derivative(&path, ((float) i) / (float) resolution);
-
-        std::vector<Vertex> rs = {};
-        for (auto point : shape_points) {
-            auto t = glm::translate(glm::mat4(1), origin);
-            auto r = glm::toMat4(
-                glm::rotation(glm::vec3(0, 0, -1), glm::normalize(forward))
-            );
-
-            auto new_point = glm::vec3(t * r * glm::vec4(point.position, 1));
-            auto new_norm = glm::vec3(r * glm::vec4(point.normal, 1));
-            std::println("{:.03f}, {:.03f}", new_point, new_norm);
-            rs.push_back({ new_point, new_norm });
-        }
-        result.push_back(rs);
-
-        std::println();
-    }
-
-    return { path, result };
-}
-
 int main() {
     std::vector<glm::vec3> path = {
-        {  0.0, 0.0,  0.0 },
-        {  0.0, 0.0, 20.0 },
-        { 20.0, 0.0, 20.0 },
+        {  0, 0,   0 },
+        {  0, 0,  20 },
+        { 20, 0,  20 },
+        { 40, 0,  20 },
+        { 40, 0,   0 },
+        { 40, 0, -20 },
+        { 20, 0, -20 },
+        {  0, 0, -20 },
+        {  0, 0,   0 },
     };
     std::vector<glm::vec2> shape = {
         { -10.0,  5.0 },
@@ -649,13 +552,7 @@ int main() {
         {  10.0,  5.0 },
     };
 
-    auto terrain = build_terrain(path, shape, 10);
-
-    // for (int i = 0; i <= 10; i++) {
-    //     auto point = bezier(&shape, ((float) i) / 10.0f);
-    //     auto der = bezier_derivative(&shape, ((float) i) / 10.0f);
-    //     std::println("{}: {} ({})", i, point, der);
-    // }
+    auto track = Track::build({ path }, { shape }, 100, 16);
 
     u8 TEXTURE[27 * 4] = { 0 };
     u32 i = 0;
@@ -717,7 +614,8 @@ int main() {
 
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
-    auto vertexShader = Shader::vertex(assets::shader::VERTEX);
+    auto vertexShader =
+        Shader::vertex(assets::shader::VERTEX, sizeof(assets::shader::VERTEX));
     auto vertexPbrShader = Shader::vertex(
         assets::shader::VERTEX_PBR, sizeof(assets::shader::VERTEX_PBR)
     );
@@ -763,7 +661,7 @@ int main() {
     state.shaderProgramOrange.uniform("MVP", glm::mat4(1));
     state.guiShader.uniform("color", glm::vec4(1));
 
-    state.terrain = terrain;
+    state.track = track;
 
     state.VAOs[0] = VAO::gen();
     state.VAOs[0].enableAttributeArray(0);
@@ -946,52 +844,6 @@ void drawRect(
     glDepthMask(true);
 }
 
-float plane_point_distance(Vertex plane, glm::vec3 point) {
-    return glm::dot(plane.normal, (point - plane.position));
-}
-
-float find_position(Terrain terrain, glm::vec3 position) {
-    auto a = 0.0f;
-    auto b = 1.0f;
-
-    while (true) {
-        auto position_a = bezier(&terrain.original, a);
-        auto normal_a = glm::normalize(bezier_derivative(&terrain.original, a));
-
-        auto position_b = bezier(&terrain.original, b);
-        auto normal_b = glm::normalize(bezier_derivative(&terrain.original, b));
-
-        auto distance_a =
-            plane_point_distance({ position_a, normal_a }, position);
-
-        auto distance_b =
-            -plane_point_distance({ position_b, normal_b }, position);
-
-        // std::println("a: {}, {}", a, distance_a);
-        // std::println("b: {}, {}", b, distance_b);
-
-        if (distance_a <= 0 && distance_b > 0) {
-            return a;
-        }
-
-        if (distance_b <= 0 && distance_a > 0) {
-            return b;
-        }
-
-        auto middle = (a + b) / 2.0f;
-
-        if (abs(distance_a - distance_b) < 1e-5) {
-            return middle;
-        }
-
-        if (distance_a < distance_b) {
-            b = middle;
-        } else {
-            a = middle;
-        }
-    }
-}
-
 void render(GameState* state) {
     auto projection = glm::perspective(
         glm::radians(70.0f), (float) window_width / window_height, 0.1f, 100.0f
@@ -1012,9 +864,9 @@ void render(GameState* state) {
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
     transform = {
-        glm::vec3(1, 1, 0),
-        glm::vec3(0.25),
-        glm::vec3(0, 0, ((float) state->count) / 512.0f * 2.0f * M_PIf),
+        vec3(1, 1, 0),
+        vec3(0.25),
+        vec3(0, 0, ((float) state->count) / 512.0f * 2.0f * M_PIf),
     };
 
     state->shaderProgramYellow.use();
@@ -1031,9 +883,9 @@ void render(GameState* state) {
     // glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, assets::indices::CUBE);
 
     transform = {
-        glm::vec3(0),
-        glm::vec3(50),
-        glm::vec3(glm::radians(90.0f), 0, 0),
+        vec3(0),
+        vec3(50),
+        vec3(glm::radians(90.0f), 0, 0),
     };
 
     state->shaderProgramYellow.uniform(
@@ -1047,8 +899,10 @@ void render(GameState* state) {
     );
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, assets::indices::PLANE);
 
+    auto road = state->track.find_vertex(car.position);
+
     transform = {
-        car.position + glm::vec3(0, 0.25, 0),
+        car.position + road.up * 0.15f,
         car.scale,
         car.orientation,
     };
@@ -1063,20 +917,19 @@ void render(GameState* state) {
     state->pbrVAO.bind();
     state->car_mesh.draw(&state->pbrVBO);
 
-    std::vector<glm::vec2> wheel_positions = {
-        glm::vec2(-1, -1),
-        glm::vec2(1, -1),
-        glm::vec2(1, 1),
-        glm::vec2(-1, 1),
+    std::vector<vec2> wheel_positions = {
+        vec2(-1, -1),
+        vec2(1, -1),
+        vec2(1, 1),
+        vec2(-1, 1),
     };
 
     for (auto i = 0; i < 4; i++) {
         auto is_front = i < 2;
         auto pos = wheel_positions[i];
         auto wheel = Transform{
-            .position =
-                glm::vec3((0.9 + is_front * 0.1) * pos.x, 0, 1.2 * pos.y),
-            .rotation = glm::vec3(
+            .position = vec3((0.9 + is_front * 0.1) * pos.x, 0, 1.2 * pos.y),
+            .rotation = vec3(
                 0, -glm::radians(car.wheel_direction * is_front * 30.0f), 0
             ),
         };
@@ -1087,47 +940,14 @@ void render(GameState* state) {
         state->wheel_mesh.draw(&state->pbrVBO);
     }
 
-    std::vector<u32> indices = {};
-    std::vector<float> dataa = {};
-    for (auto row : state->terrain.rows) {
-        for (auto [i, vertex] : row | std::views::enumerate) {
-            dataa.push_back(vertex.position.x);
-            dataa.push_back(vertex.position.y);
-            dataa.push_back(vertex.position.z);
-            dataa.push_back(vertex.normal.x + (i == 5));
-            dataa.push_back(vertex.normal.y + (i == 5));
-            dataa.push_back(vertex.normal.z + (i == 5));
-            dataa.push_back(0.0f);
-            dataa.push_back(0.0f);
-            dataa.push_back(vertex.normal.x);
-            dataa.push_back(vertex.normal.y);
-            dataa.push_back(vertex.normal.z);
-        }
-    }
+    auto [dataa, indices] = state->track.mesh();
 
-    for (auto i = 1; i < 11; i++) {
-        for (auto j = 1; j < 11; j++) {
-            auto x1 = (i - 1) * 11;
-            auto x2 = i * 11;
-            auto y1 = j - 1;
-            auto y2 = j;
-            indices.push_back(x1 + y1);
-            indices.push_back(x1 + y2);
-            indices.push_back(x2 + y2);
-            indices.push_back(x1 + y1);
-            indices.push_back(x2 + y2);
-            indices.push_back(x2 + y1);
-        }
-    }
-
-    glPointSize(5);
+    state->white_texture.bind();
     state->pbrShaderProgram.uniform("MVP", projection * view);
     state->pbrVBO.data(&dataa, GL_STATIC_DRAW);
     glDrawElements(
         GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, indices.data()
     );
-
-    std::println("{}", find_position(state->terrain, car.position));
 
     drawRect(state, 1, 1, 2 + 12 + 9 * 8 + 1, 2 + 3 * 8 + 1, 0x5F000000);
 
@@ -1162,6 +982,13 @@ void render(GameState* state) {
         ),
         2 + 12,
         5 + 24
+    );
+
+    state->drawString("T", 2, 96, 0xFFFF3F3F);
+    state->drawString("S", 2, 96 + 8, 0xFFFF3F3F);
+
+    state->drawString(
+        std::format("{:.3f}\n{:.3f}", road.t, road.s), 2 + 12, 96, 0xFFFFFFFF
     );
 
     if (state->paused) {
@@ -1272,15 +1099,20 @@ void update(GLFWwindow* window, GameState* state) {
     // camera_vertical = 0;
 
     car.move(
-        controls.vertical, controls.horizontal, controls.jump, controls.boost
+        controls.vertical,
+        controls.horizontal,
+        controls.jump,
+        controls.boost,
+        state->track
     );
 
     // car.position.y = 1.0f;
     if (glfwGetKey(window, GLFW_KEY_R)) {
-        car.orientation = glm::quat();
+        car.orientation = quat();
     }
 
-    auto on_floor = car.position.y <= 0.0f;
+    auto road = state->track.find_vertex(car.position);
+    auto on_floor = road.distance < 1e-5f;
 
     if (on_floor) {
         auto yaw = car.yaw();
@@ -1298,21 +1130,21 @@ void update(GLFWwindow* window, GameState* state) {
     while (camera.yaw < -pi)
         camera.yaw += 2.0f * pi;
 
-    glm::vec3 front = {
+    vec3 front = {
         sin(camera.yaw),
         0,
         cos(camera.yaw),
     };
 
     auto offset = controls.camera_vertical == 0
-                      ? glm::normalize(glm::vec3(0, 0.5, 0) + front)
-                  : controls.camera_vertical > 0 ? glm::vec3(0, 1, 0)
+                      ? glm::normalize(vec3(0, 0.5, 0) + front)
+                  : controls.camera_vertical > 0 ? vec3(0, 1, 0)
                                                  : front;
 
-    camera.position = car.position + glm::vec3(0, 0.25, 0) + offset;
+    camera.position = car.position + vec3(0, 0.25, 0) + offset;
 
-    offset = controls.camera_vertical > 0 ? glm::vec3(0, 0.5, 0) - front * 0.1f
-                                          : glm::vec3(0, 0.5, 0) - front * 0.5f;
+    offset = controls.camera_vertical > 0 ? vec3(0, 0.5, 0) - front * 0.1f
+                                          : vec3(0, 0.25, 0) - front * 0.5f;
 
     camera.target = car.position + offset;
 
@@ -1322,7 +1154,7 @@ void update(GLFWwindow* window, GameState* state) {
         particle.lifetime -= 1;
     }
     std::erase_if(state->particles, [](auto x) { return x.lifetime == 0; });
-    state->particles.push_back({ car.position, glm::vec3(0.1), 20 });
+    state->particles.push_back({ car.position, vec3(0.1), 20 });
 
     // camera.rotate(
     //     glfwGetKey(window, GLFW_KEY_LEFT),

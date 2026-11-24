@@ -3,7 +3,7 @@
 
 namespace assets {
     namespace shader {
-        const std::string VERTEX = {
+        const char VERTEX[] = {
 #embed "vertex.glsl"
         };
 
