@@ -1,11 +1,15 @@
 #include <algorithm>
+#include <cstdlib>
 #include <numbers>
 #define GLM_ENABLE_EXPERIMENTAL
 #define STB_IMAGE_IMPLEMENTATION
 
 #include "assets.h"
+#include "bezier.cpp"
 #include "font.cpp"
+#include "glm_format.cpp"
 #include "objects.cpp"
+#include "track.cpp"
 #include "types.h"
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -14,7 +18,6 @@
 #include <assimp/scene.h>
 #include <cmath>
 #include <cstddef>
-#include <cstdio>
 #include <format>
 #include <glm/common.hpp>
 #include <glm/ext/matrix_clip_space.hpp>
@@ -28,24 +31,23 @@
 #include <glm/geometric.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtx/string_cast.hpp>
 #include <glm/matrix.hpp>
 #include <glm/trigonometric.hpp>
-#include <iostream>
 #include <math.h>
-#include <ostream>
+#include <print>
 #include <time.h>
 #include <vector>
 
+using glm::vec2, glm::vec3, glm::vec4, glm::quat, glm::mat4;
 using std::numbers::pi;
 
 class Particle {
   public:
-    glm::vec3 position;
-    glm::vec3 scale;
+    vec3 position;
+    vec3 scale;
     u32 lifetime;
 };
 
@@ -114,18 +116,16 @@ u32 window_height = 600;
 class Camera {
   public:
     float speed = 0.05f;
-    glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+    vec3 up = vec3(0.0f, 1.0f, 0.0f);
 
     f32 pitch = 0.0f;
     float yaw = 0.0f;
 
-    glm::vec3 position = glm::vec3(0);
-    glm::vec3 target = glm::vec3(0);
-    glm::vec3 front = glm::vec3(1);
+    vec3 position = vec3(0);
+    vec3 target = vec3(0);
+    vec3 front = vec3(1);
 
-    glm::mat4 viewMatrix() {
-        return glm::lookAt(position, position + front, up);
-    }
+    mat4 viewMatrix() { return glm::lookAt(position, position + front, up); }
 
     void move(
         bool forward,
@@ -206,38 +206,47 @@ glm::quat offsetOrientation(
 
 class Car {
   public:
-    glm::vec3 position = glm::vec3(0, 0, 0);
-    glm::vec3 scale = glm::vec3(0.1);
+    vec3 position = vec3(0, 0, 0);
+    vec3 scale = vec3(0.1);
 
-    glm::quat orientation = glm::quat();
+    quat orientation = quat();
 
-    glm::vec3 speed = glm::vec3(0);
-    glm::vec2 rotation_speed = glm::vec2(0);
+    vec3 speed = vec3(0);
+    vec2 rotation_speed = vec2(0);
 
     bool space_last_pressed = false;
     i32 jump_state = 1;
     float wheel_direction = 0;
 
-    glm::vec3 front() {
+    vec3 front() {
         // return glm::vec3(-sin(yaw), 0, -cos(yaw));
-        auto front = orientation * glm::vec3(0, 0, -1);
+        auto front = orientation * vec3(0, 0, -1);
         front.y = 0;
         return glm::normalize(front);
     }
 
     float yaw() {
         auto front = this->front();
-        auto forward = glm::vec3(0, 0, -1);
-        auto up = glm::vec3(0, 1, 0);
+        auto forward = vec3(0, 0, -1);
+        auto up = vec3(0, 1, 0);
 
         return atan2(
             glm::dot(glm::cross(forward, front), up), glm::dot(forward, front)
         );
     }
 
-    void move(float vertical, float horizontal, bool space, bool fast) {
+    void move(
+        float vertical,
+        float horizontal,
+        bool space,
+        bool fast,
+        Track track
+    ) {
+        auto road = track.find_vertex(this->position);
+        auto on_floor = road.distance < 1e-5f;
+        on_floor = true;
+
         auto max_speed = (float) (fast * 3 + 1);
-        auto on_floor = position.y <= 0.0f;
 
         if (on_floor) {
             wheel_direction = horizontal;
@@ -251,7 +260,7 @@ class Car {
 
         const float FLIP_TIME = 30.0f;
 
-        if (rotation_speed == glm::vec2(0)) {
+        if (rotation_speed == vec2(0)) {
             if (on_floor)
                 yaw -= glm::radians(horizontal * 3.0f * vertical);
             else {
@@ -264,11 +273,14 @@ class Car {
             }
         }
 
-        auto front = this->front();
+        orientation = offsetOrientation(orientation, vec3(0, 1, 0), yaw);
+        orientation = offsetOrientation(orientation, vec3(1, 0, 0), pitch);
+        orientation = offsetOrientation(orientation, vec3(0, 0, 1), roll);
 
         if (on_floor) {
+            auto front = this->orientation * vec3(0, 0, -1);
             speed += max_speed * vertical * 0.1f * front;
-            auto speed_horizontal = glm::vec2(speed.x, speed.z);
+            auto speed_horizontal = vec2(speed.x, speed.z);
             if (glm::length(speed_horizontal) > max_speed) {
                 speed_horizontal = glm::normalize(speed_horizontal) * max_speed;
                 speed.x = speed_horizontal.x;
@@ -276,65 +288,70 @@ class Car {
             }
         }
 
-        if (space) {
-            if (on_floor && !space_last_pressed) {
-                speed.y = 0.25f;
-            } else {
-                auto right = glm::cross(front, { 0, 1, 0 });
+        // if (space) {
+        //     if (on_floor && !space_last_pressed) {
+        //         speed.y = 0.25f;
+        //     } else {
+        //         auto right = glm::cross(front, { 0, 1, 0 });
 
-                if (jump_state == 1 && !space_last_pressed) {
-                    rotation_speed = glm::vec2(-horizontal, -vertical);
-                    if (rotation_speed != glm::vec2(0)) {
-                        jump_state = -FLIP_TIME;
-                        rotation_speed = glm::normalize(rotation_speed);
-                        speed = front * (vertical * 0.3f) +
-                                right * (horizontal * 0.3f);
-                    } else {
-                        auto up = orientation * glm::vec3(0, 1, 0);
-                        speed = up * 0.25f;
-                    }
-                }
-            }
-        }
+        //         if (jump_state == 1 && !space_last_pressed) {
+        //             rotation_speed = vec2(-horizontal, -vertical);
+        //             if (rotation_speed != vec2(0)) {
+        //                 jump_state = -FLIP_TIME;
+        //                 rotation_speed = glm::normalize(rotation_speed);
+        //                 speed = front * (vertical * 0.3f) +
+        //                         right * (horizontal * 0.3f);
+        //             } else {
+        //                 auto up = orientation * vec3(0, 1, 0);
+        //                 speed = up * 0.25f;
+        //             }
+        //         }
+        //     }
+        // }
 
-        space_last_pressed = space;
+        // space_last_pressed = space;
 
-        if (jump_state < 0) {
-            roll += 2.0f * pi / FLIP_TIME * rotation_speed.x;
-            pitch += 2.0f * pi / FLIP_TIME * rotation_speed.y;
-            jump_state += 1;
+        // if (jump_state < 0) {
+        //     roll += 2.0f * pi / FLIP_TIME * rotation_speed.x;
+        //     pitch += 2.0f * pi / FLIP_TIME * rotation_speed.y;
+        //     jump_state += 1;
 
-            if (jump_state == 0)
-                rotation_speed = glm::vec2(0);
-        } else {
-            speed.y -= 0.01f;
-        }
+        //     if (jump_state == 0)
+        //         rotation_speed = glm::vec2(0);
+        // } else {
+        //     speed.y -= 0.01f;
+        // }
 
         // roll += rotation_speed.x;
         // pitch += rotation_speed.y;
         position += speed;
+        speed = vec3(0);
         // position.y = 1;
 
-        front = this->front();
+        road = track.find_vertex(this->position);
+        // on_floor = road.distance < 1e-5f;
 
-        if (position.y <= 0.0f) {
-            position.y = 0;
+        if (on_floor) {
+            // auto forward = this->front();
+            auto forward = this->orientation * vec3(0, 0, -1);
+            auto left = glm::cross(road.up, forward);
+            forward = glm::cross(left, road.up);
 
-            roll = 0;
-            pitch = 0;
-            orientation = glm::angleAxis(this->yaw(), glm::vec3(0, 1, 0));
-
-            speed = glm::vec3(0);
-            rotation_speed = glm::vec2(0);
-            jump_state = 1;
+            this->position = road.position;
+            this->orientation = glm::quatLookAt(forward, road.up);
         }
 
-        orientation =
-            offsetOrientation(orientation, glm::vec3(0, 1, 0), yaw, true);
-        orientation =
-            offsetOrientation(orientation, glm::vec3(1, 0, 0), pitch, true);
-        orientation =
-            offsetOrientation(orientation, glm::vec3(0, 0, 1), roll, true);
+        // if (position.y <= 0.0f) {
+        //     position.y = 0;
+
+        //     roll = 0;
+        //     pitch = 0;
+        //     orientation = glm::angleAxis(this->yaw(), glm::vec3(0, 1, 0));
+
+        //     speed = glm::vec3(0);
+        //     rotation_speed = glm::vec2(0);
+        //     jump_state = 1;
+        // }
     }
 };
 
@@ -374,6 +391,8 @@ class GameState {
     ShaderProgram shaderProgramOrange;
     ShaderProgram shaderProgramYellow;
     ShaderProgram guiShader;
+
+    Track track;
 
     VAO VAOs[2] = { VAO::empty(), VAO::empty() };
     VAO gui_vao = VAO::empty();
@@ -516,6 +535,25 @@ void render(GameState* state);
 void update(GLFWwindow* window, GameState* state);
 
 int main() {
+    std::vector<glm::vec3> path = {
+        {  0, 0,   0 },
+        {  0, 0,  20 },
+        { 20, 0,  20 },
+        { 40, 0,  20 },
+        { 40, 0,   0 },
+        { 40, 0, -20 },
+        { 20, 0, -20 },
+        {  0, 0, -20 },
+        {  0, 0,   0 },
+    };
+    std::vector<glm::vec2> shape = {
+        { -10.0,  5.0 },
+        {   0.0, -5.0 },
+        {  10.0,  5.0 },
+    };
+
+    auto track = Track::build({ path }, { shape }, 100, 16);
+
     u8 TEXTURE[27 * 4] = { 0 };
     u32 i = 0;
     for (u32 r = 0; r < 3; r++) {
@@ -532,7 +570,7 @@ int main() {
 
     glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
     if (!glfwInit()) {
-        std::cerr << "Failed to initialize GLFW" << std::endl;
+        std::println(stderr, "Failed to initialize GLFW");
         return -1;
     }
 
@@ -544,7 +582,7 @@ int main() {
         window_width, window_height, "LearnOpenGL", NULL, NULL
     );
     if (window == NULL) {
-        std::cout << "Failed to create GLFW window" << std::endl;
+        std::println("Failed to create GLFW window");
         glfwTerminate();
         return -1;
     }
@@ -553,9 +591,7 @@ int main() {
     glewExperimental = GL_TRUE;
     GLenum err = glewInit();
     if (err != GLEW_OK) {
-        std::cerr << "GLEW error: "
-                  << glewGetErrorString(err)
-                  << std::endl;
+        std::println(stderr, "GLEW error: {}", (char*) glewGetErrorString(err));
         return -1;
     }
 
@@ -566,23 +602,38 @@ int main() {
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
 
-    std::cout << "" << std::endl;
-    std::cout << "OpenGL Vendor: " << glGetString(GL_VENDOR) << std::endl;
-    std::cout << "OpenGL Renderer: " << glGetString(GL_RENDERER) << std::endl;
-    std::cout << "OpenGL Version: " << glGetString(GL_VERSION) << std::endl;
-    std::cout << "OpenGL Shading Language Version: "
-              << glGetString(GL_SHADING_LANGUAGE_VERSION) << std::endl;
-    std::cout << std::endl;
+    std::println();
+    std::println("OpenGL Vendor: {}", (char*) glGetString(GL_VENDOR));
+    std::println("OpenGL Renderer: {}", (char*) glGetString(GL_RENDERER));
+    std::println("OpenGL Version: {}", (char*) glGetString(GL_VERSION));
+    std::println(
+        "OpenGL Shading Language Version: {}",
+        (char*) glGetString(GL_SHADING_LANGUAGE_VERSION)
+    );
+    std::println();
 
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
-    auto vertexShader = Shader::vertex(assets::shader::VERTEX, sizeof(assets::shader::VERTEX));
-    auto vertexPbrShader = Shader::vertex(assets::shader::VERTEX_PBR, sizeof(assets::shader::VERTEX_PBR));
-    auto fragmentShader = Shader::fragment(assets::shader::FRAGMENT, sizeof(assets::shader::FRAGMENT));
-    auto fragment1Shader = Shader::fragment(assets::shader::FRAGMENT_1, sizeof(assets::shader::FRAGMENT_1));
-    auto fragmentPbrShader = Shader::fragment(assets::shader::FRAGMENT_PBR, sizeof(assets::shader::FRAGMENT_PBR));
-    auto vertexGuiShader = Shader::vertex(assets::shader::VERTEX_GUI, sizeof(assets::shader::VERTEX_GUI));
-    auto fragmentGuiShader = Shader::fragment(assets::shader::FRAGMENT_GUI, sizeof(assets::shader::FRAGMENT_GUI));
+    auto vertexShader =
+        Shader::vertex(assets::shader::VERTEX, sizeof(assets::shader::VERTEX));
+    auto vertexPbrShader = Shader::vertex(
+        assets::shader::VERTEX_PBR, sizeof(assets::shader::VERTEX_PBR)
+    );
+    auto fragmentShader = Shader::fragment(
+        assets::shader::FRAGMENT, sizeof(assets::shader::FRAGMENT)
+    );
+    auto fragment1Shader = Shader::fragment(
+        assets::shader::FRAGMENT_1, sizeof(assets::shader::FRAGMENT_1)
+    );
+    auto fragmentPbrShader = Shader::fragment(
+        assets::shader::FRAGMENT_PBR, sizeof(assets::shader::FRAGMENT_PBR)
+    );
+    auto vertexGuiShader = Shader::vertex(
+        assets::shader::VERTEX_GUI, sizeof(assets::shader::VERTEX_GUI)
+    );
+    auto fragmentGuiShader = Shader::fragment(
+        assets::shader::FRAGMENT_GUI, sizeof(assets::shader::FRAGMENT_GUI)
+    );
 
     GameState state = {
         .pbrShaderProgram =
@@ -609,6 +660,8 @@ int main() {
 
     state.shaderProgramOrange.uniform("MVP", glm::mat4(1));
     state.guiShader.uniform("color", glm::vec4(1));
+
+    state.track = track;
 
     state.VAOs[0] = VAO::gen();
     state.VAOs[0].enableAttributeArray(0);
@@ -811,9 +864,9 @@ void render(GameState* state) {
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
     transform = {
-        glm::vec3(1, 1, 0),
-        glm::vec3(0.25),
-        glm::vec3(0, 0, ((float) state->count) / 512.0f * 2.0f * M_PIf),
+        vec3(1, 1, 0),
+        vec3(0.25),
+        vec3(0, 0, ((float) state->count) / 512.0f * 2.0f * M_PIf),
     };
 
     state->shaderProgramYellow.use();
@@ -830,9 +883,9 @@ void render(GameState* state) {
     // glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, assets::indices::CUBE);
 
     transform = {
-        glm::vec3(0),
-        glm::vec3(50),
-        glm::vec3(glm::radians(90.0f), 0, 0),
+        vec3(0),
+        vec3(50),
+        vec3(glm::radians(90.0f), 0, 0),
     };
 
     state->shaderProgramYellow.uniform(
@@ -846,8 +899,10 @@ void render(GameState* state) {
     );
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, assets::indices::PLANE);
 
+    auto road = state->track.find_vertex(car.position);
+
     transform = {
-        car.position + glm::vec3(0, 0.25, 0),
+        car.position + road.up * 0.15f,
         car.scale,
         car.orientation,
     };
@@ -862,20 +917,19 @@ void render(GameState* state) {
     state->pbrVAO.bind();
     state->car_mesh.draw(&state->pbrVBO);
 
-    std::vector<glm::vec2> wheel_positions = {
-        glm::vec2(-1, -1),
-        glm::vec2(1, -1),
-        glm::vec2(1, 1),
-        glm::vec2(-1, 1),
+    std::vector<vec2> wheel_positions = {
+        vec2(-1, -1),
+        vec2(1, -1),
+        vec2(1, 1),
+        vec2(-1, 1),
     };
 
     for (auto i = 0; i < 4; i++) {
         auto is_front = i < 2;
         auto pos = wheel_positions[i];
         auto wheel = Transform{
-            .position =
-                glm::vec3((0.9 + is_front * 0.1) * pos.x, 0, 1.2 * pos.y),
-            .rotation = glm::vec3(
+            .position = vec3((0.9 + is_front * 0.1) * pos.x, 0, 1.2 * pos.y),
+            .rotation = vec3(
                 0, -glm::radians(car.wheel_direction * is_front * 30.0f), 0
             ),
         };
@@ -885,6 +939,15 @@ void render(GameState* state) {
         );
         state->wheel_mesh.draw(&state->pbrVBO);
     }
+
+    auto [dataa, indices] = state->track.mesh();
+
+    state->white_texture.bind();
+    state->pbrShaderProgram.uniform("MVP", projection * view);
+    state->pbrVBO.data(&dataa, GL_STATIC_DRAW);
+    glDrawElements(
+        GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, indices.data()
+    );
 
     drawRect(state, 1, 1, 2 + 12 + 9 * 8 + 1, 2 + 3 * 8 + 1, 0x5F000000);
 
@@ -919,6 +982,13 @@ void render(GameState* state) {
         ),
         2 + 12,
         5 + 24
+    );
+
+    state->drawString("T", 2, 96, 0xFFFF3F3F);
+    state->drawString("S", 2, 96 + 8, 0xFFFF3F3F);
+
+    state->drawString(
+        std::format("{:.3f}\n{:.3f}", road.t, road.s), 2 + 12, 96, 0xFFFFFFFF
     );
 
     if (state->paused) {
@@ -970,12 +1040,12 @@ class Controls {
 
                 auto buttons = glfwGetJoystickButtons(i, &count);
                 for (int j = 0; j < count; j++) {
-                    printf("button %d = %d\n", j, buttons[j]);
+                    std::println("button {} = {}", j, buttons[j]);
                 }
 
                 auto axes = glfwGetJoystickAxes(i, &count);
                 for (int j = 0; j < count; j++) {
-                    printf("axis %d = %f\n", j, axes[j]);
+                    std::println("axis {} = {}", j, axes[j]);
                 }
 
                 result.jump = buttons[0];
@@ -1029,15 +1099,20 @@ void update(GLFWwindow* window, GameState* state) {
     // camera_vertical = 0;
 
     car.move(
-        controls.vertical, controls.horizontal, controls.jump, controls.boost
+        controls.vertical,
+        controls.horizontal,
+        controls.jump,
+        controls.boost,
+        state->track
     );
 
     // car.position.y = 1.0f;
     if (glfwGetKey(window, GLFW_KEY_R)) {
-        car.orientation = glm::quat();
+        car.orientation = quat();
     }
 
-    auto on_floor = car.position.y <= 0.0f;
+    auto road = state->track.find_vertex(car.position);
+    auto on_floor = road.distance < 1e-5f;
 
     if (on_floor) {
         auto yaw = car.yaw();
@@ -1055,21 +1130,21 @@ void update(GLFWwindow* window, GameState* state) {
     while (camera.yaw < -pi)
         camera.yaw += 2.0f * pi;
 
-    glm::vec3 front = {
+    vec3 front = {
         sin(camera.yaw),
         0,
         cos(camera.yaw),
     };
 
     auto offset = controls.camera_vertical == 0
-                      ? glm::normalize(glm::vec3(0, 0.5, 0) + front)
-                  : controls.camera_vertical > 0 ? glm::vec3(0, 1, 0)
+                      ? glm::normalize(vec3(0, 0.5, 0) + front)
+                  : controls.camera_vertical > 0 ? vec3(0, 1, 0)
                                                  : front;
 
-    camera.position = car.position + glm::vec3(0, 0.25, 0) + offset;
+    camera.position = car.position + vec3(0, 0.25, 0) + offset;
 
-    offset = controls.camera_vertical > 0 ? glm::vec3(0, 0.5, 0) - front * 0.1f
-                                          : glm::vec3(0, 0.5, 0) - front * 0.5f;
+    offset = controls.camera_vertical > 0 ? vec3(0, 0.5, 0) - front * 0.1f
+                                          : vec3(0, 0.25, 0) - front * 0.5f;
 
     camera.target = car.position + offset;
 
@@ -1079,7 +1154,7 @@ void update(GLFWwindow* window, GameState* state) {
         particle.lifetime -= 1;
     }
     std::erase_if(state->particles, [](auto x) { return x.lifetime == 0; });
-    state->particles.push_back({ car.position, glm::vec3(0.1), 20 });
+    state->particles.push_back({ car.position, vec3(0.1), 20 });
 
     // camera.rotate(
     //     glfwGetKey(window, GLFW_KEY_LEFT),
