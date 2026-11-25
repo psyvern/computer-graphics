@@ -506,7 +506,7 @@ class GameState {
         if (shadow) {
             this->guiShader.uniform("color", { 0, 0, 0, 0.75 });
             this->guiShader.uniform(
-                "MVP", glm::translate(transform, glm::vec3(x + 1, y + 1, 0))
+                "MVP", glm::translate(transform, glm::vec3(x + 1, y + 1, -1))
             );
             glDrawElements(
                 GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, indices.data()
@@ -515,7 +515,7 @@ class GameState {
 
         this->guiShader.uniform("color", color.inner);
         this->guiShader.uniform(
-            "MVP", glm::translate(transform, glm::vec3(x, y, 0))
+            "MVP", glm::translate(transform, glm::vec3(x, y, -1))
         );
 
         glDrawElements(
@@ -829,7 +829,7 @@ void drawRect(
 
     state->guiShader.uniform("color", color.inner);
     state->guiShader.uniform(
-        "MVP", glm::translate(transform, glm::vec3(0, 0, 0))
+        "MVP", glm::translate(transform, glm::vec3(0, 0, -1))
     );
 
     glDrawElements(
