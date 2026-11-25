@@ -10,6 +10,10 @@ template <glm::length_t L> struct Vertex {
     glm::vec<L, float, glm::defaultp> normal;
 };
 
+float plane_point_distance(Vertex<3> plane, glm::vec3 point) {
+    return glm::dot(plane.normal, point - plane.position);
+}
+
 template <glm::length_t L> class Bezier {
   public:
     std::vector<glm::vec<L, float, glm::defaultp>> points;
@@ -22,38 +26,83 @@ template <glm::length_t L> class Bezier {
     // derivative
     Vertex<L> sample(float t) { return sample_internal(&this->points, t); }
 
-    float closestPoint(glm::vec3 position, u32 scans = 25, float ε = 1e-4) {
-        int mindex;
+    float closest_point(glm::vec3 position, size_t scans = 25, float ε = 1e-4) {
+        bool loop = this->loop();
+
+        size_t index;
         float min = INFINITY;
-        for (int i = 0; i <= scans; i++) {
-            auto d2 =
-                glm::distance2(position, this->value(((float) i) / scans));
-            if (d2 < min) {
-                min = d2;
-                mindex = i;
+
+        for (int i = 0; i < scans + (loop ? 0 : 1); i++) {
+            auto d = glm::distance2(position, this->value(((float) i) / scans));
+
+            if (d < min) {
+                index = i;
+                min = d;
             }
         }
-        auto m = fmax(((float) mindex - 1.0f) / (float) scans, 0.0f);
-        auto n = fmin(((float) mindex + 1.0f) / (float) scans, 1.0f);
 
-        float k;
-        float d;
-        while ((n - m) > ε) {
-            k = (n + m) / 2;
-            auto d1 = glm::distance2(position, this->value(k - ε));
-            auto d2 = glm::distance2(position, this->value(k + ε));
+        min = plane_point_distance(
+            this->sample(((float) index) / scans), position
+        );
+
+        size_t index_1, index_2;
+
+        if (loop) {
+            if (min > 0.0f) {
+                index_1 = index;
+                index_2 = index + 1;
+            } else if (min < 0.0f) {
+                if (index == 0) {
+                    index_1 = scans - 1;
+                    index_2 = scans;
+                } else {
+                    index_1 = index - 1;
+                    index_2 = index;
+                }
+            }
+        } else {
+            if (min > 0.0f) {
+                if (index == scans) {
+                    index_1 = index;
+                    index_2 = index;
+                } else {
+                    index_1 = index;
+                    index_2 = index + 1;
+                }
+            } else {
+                if (index == 0) {
+                    index_1 = index;
+                    index_2 = index;
+                } else {
+                    index_1 = index - 1;
+                    index_2 = index;
+                }
+            }
+        }
+
+        auto m = (float) index_1 / scans;
+        auto n = (float) index_2 / scans;
+
+        while (true) {
+            float k = (m + n) / 2;
+            if (n - m < ε)
+                return k;
+
+            auto d1 = glm::distance2(position, this->value(m));
+            auto d2 = glm::distance2(position, this->value(n));
+
+            // auto d1 = fabs(plane_point_distance(this->sample(m), position));
+            // auto d2 = fabs(plane_point_distance(this->sample(n), position));
 
             if (d1 < d2) {
                 n = k;
-                d = d1;
             } else {
                 m = k;
-                d = d2;
             }
         }
-
-        return k;
     }
+
+    bool loop() { return points.front() == points.back(); }
 
   private:
     static glm::vec<L, float, glm::defaultp> value_internal(

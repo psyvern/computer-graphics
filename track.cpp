@@ -32,6 +32,7 @@ struct Track {
         size_t path_resolution,
         size_t shape_resolution
     ) {
+        auto loop = path.loop();
         std::vector<Vertex<3>> shape_points = {};
         std::vector<std::vector<Vertex<3>>> rows = {};
 
@@ -49,7 +50,7 @@ struct Track {
             );
         }
 
-        for (size_t i = 0; i <= path_resolution; i++) {
+        for (size_t i = 0; i < path_resolution + (loop ? 0 : 1); i++) {
             auto [origin, forward] =
                 path.sample(((float) i) / (float) path_resolution);
 
@@ -74,6 +75,8 @@ struct Track {
     }
 
     std::tuple<std::vector<float>, std::vector<u32>> mesh() {
+        auto loop = path.loop();
+
         std::vector<u32> indices = {};
         std::vector<float> data = {};
         int counter = 0;
@@ -132,10 +135,25 @@ struct Track {
             }
         }
 
-        for (auto i = 1; i <= path_resolution; i++) {
+        for (auto i = 1; i < path_resolution + (loop ? 0 : 1); i++) {
             for (auto j = 1; j <= shape_resolution; j++) {
                 auto x1 = (i - 1) * (shape_resolution + 1);
                 auto x2 = i * (shape_resolution + 1);
+                auto y1 = j - 1;
+                auto y2 = j;
+                indices.push_back(x1 + y1);
+                indices.push_back(x1 + y2);
+                indices.push_back(x2 + y2);
+                indices.push_back(x1 + y1);
+                indices.push_back(x2 + y2);
+                indices.push_back(x2 + y1);
+            }
+        }
+
+        if (loop) {
+            for (auto j = 1; j <= shape_resolution; j++) {
+                auto x1 = (path_resolution - 1) * (shape_resolution + 1);
+                auto x2 = 0 * (shape_resolution + 1);
                 auto y1 = j - 1;
                 auto y2 = j;
                 indices.push_back(x1 + y1);
@@ -151,7 +169,7 @@ struct Track {
     }
 
     FindVertexResult find_vertex(vec3 position) {
-        auto t = path.closestPoint(position, 64);
+        auto t = path.closest_point(position, 64);
         auto [t_position, t_normal] = path.sample(t);
 
         auto r = glm::toMat4(glm::rotation(t_normal, vec3(0, 0, -1)));
@@ -166,7 +184,7 @@ struct Track {
             std::ranges::to<std::vector>()
         };
 
-        auto s = shape.closestPoint(position, 64);
+        auto s = shape.closest_point(position, 64);
 
         auto [s_position, s_normal] = shape.sample(s);
 

@@ -218,6 +218,10 @@ class Car {
     i32 jump_state = 1;
     float wheel_direction = 0;
 
+    bool on_floor = true;
+    float track_t;
+    float track_s;
+
     vec3 front() {
         // return glm::vec3(-sin(yaw), 0, -cos(yaw));
         auto front = orientation * vec3(0, 0, -1);
@@ -242,9 +246,6 @@ class Car {
         bool fast,
         Track track
     ) {
-        auto road = track.find_vertex(this->position);
-        auto on_floor = road.distance < 1e-3f;
-
         auto max_speed = (float) (fast * 3 + 1);
 
         if (on_floor) {
@@ -327,10 +328,12 @@ class Car {
 
         position += speed;
 
-        road = track.find_vertex(this->position);
+        auto road = track.find_vertex(this->position);
 
         // prevent going airborne while crossing a hill without actually jumping
         on_floor = on_floor || road.distance < 1e-3f;
+        track_t = road.t;
+        track_s = road.s;
 
         if (on_floor) {
             // auto forward = this->front();
@@ -891,8 +894,6 @@ void render(GameState* state) {
     );
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, assets::indices::PLANE);
 
-    auto road = state->track.find_vertex(car.position);
-
     transform = {
         car.position,
         car.scale,
@@ -980,7 +981,10 @@ void render(GameState* state) {
     state->drawString("S", 2, 96 + 8, 0xFFFF3F3F);
 
     state->drawString(
-        std::format("{:.3f}\n{:.3f}", road.t, road.s), 2 + 12, 96, 0xFFFFFFFF
+        std::format("{:.3f}\n{:.3f}", car.track_t, car.track_s),
+        2 + 12,
+        96,
+        0xFFFFFFFF
     );
 
     if (state->paused) {
@@ -1103,10 +1107,7 @@ void update(GLFWwindow* window, GameState* state) {
         car.orientation = quat();
     }
 
-    auto road = state->track.find_vertex(car.position);
-    auto on_floor = road.distance < 1e-5f;
-
-    if (on_floor) {
+    if (car.on_floor) {
         auto yaw = car.yaw();
         auto angle = min_abs(
             min_abs(yaw - camera.yaw, 2.0f * pi + yaw - camera.yaw),
