@@ -4,6 +4,7 @@
 #include "types.h"
 #include <glm/glm.hpp>
 #include <glm/gtx/norm.hpp>
+#include <vector>
 
 template <glm::length_t L> struct Vertex {
     glm::vec<L, float, glm::defaultp> position;
@@ -48,10 +49,10 @@ template <glm::length_t L> class Bezier {
         size_t index_1, index_2;
 
         if (loop) {
-            if (min > 0.0f) {
+            if (min >= 0.0f) {
                 index_1 = index;
                 index_2 = index + 1;
-            } else if (min < 0.0f) {
+            } else {
                 if (index == 0) {
                     index_1 = scans - 1;
                     index_2 = scans;
