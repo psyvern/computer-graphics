@@ -168,8 +168,7 @@ struct Track {
         }
 
         if (path_loop) {
-            for (auto j = 1; j <= shape_resolution + (shape_loop ? 0 : 1);
-                j++) {
+            for (auto j = 1; j < shape_resolution + (shape_loop ? 0 : 1); j++) {
                 auto x1 = (path_resolution - 1) * (shape_resolution + 1);
                 auto x2 = 0 * (shape_resolution + 1);
                 auto y1 = j - 1;
