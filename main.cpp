@@ -221,6 +221,8 @@ class Car {
     bool on_floor = true;
     float track_t;
     float track_s;
+    TrackCursor track_cursor;
+    vec3 surface_up = vec3(0, 1, 0);
 
     vec3 front() {
         // return glm::vec3(-sin(yaw), 0, -cos(yaw));
@@ -244,7 +246,7 @@ class Car {
         float horizontal,
         bool space,
         bool fast,
-        Track track
+        const Track& track
     ) {
         auto max_speed = (float) (fast * 3 + 1);
 
@@ -319,7 +321,7 @@ class Car {
                 rotation_speed = glm::vec2(0);
         } else {
             if (!on_floor)
-                speed.y -= 0.01f;
+                speed -= surface_up * 0.01f;
         }
 
         orientation = offsetOrientation(orientation, vec3(0, 1, 0), yaw);
@@ -328,7 +330,8 @@ class Car {
 
         position += speed;
 
-        auto road = track.find_vertex(this->position);
+        auto road = track.find_vertex(this->position, track_cursor);
+        surface_up = road.up;
 
         // prevent going airborne while crossing a hill without actually jumping
         on_floor = on_floor || road.distance < 1e-3f;
@@ -388,6 +391,8 @@ class GameState {
     ShaderProgram guiShader;
 
     Track track;
+    std::vector<float> track_data;
+    std::vector<u32> track_indices;
 
     VAO VAOs[2] = { VAO::empty(), VAO::empty() };
     VAO gui_vao = VAO::empty();
@@ -530,24 +535,9 @@ void render(GameState* state);
 void update(GLFWwindow* window, GameState* state);
 
 int main() {
-    std::vector<glm::vec3> path = {
-        {  0, 0,   0 },
-        {  0, 0,  20 },
-        { 20, 0,  20 },
-        { 40, 0,  20 },
-        { 40, 0,   0 },
-        { 40, 0, -20 },
-        { 20, 0, -20 },
-        {  0, 0, -20 },
-        {  0, 0,   0 },
-    };
-    std::vector<glm::vec2> shape = {
-        { -10.0,  5.0 },
-        {   0.0, -5.0 },
-        {  10.0,  5.0 },
-    };
-
-    auto track = Track::build({ path }, { shape }, 100, 32);
+    auto profile = TrackProfile::fromFile("profile.txt", 16);
+    auto segment = TrackSegment::fromFile("segment.txt", 32);
+    auto track = Track(segment, profile);
 
     u8 TEXTURE[27 * 4] = { 0 };
     u32 i = 0;
@@ -657,6 +647,13 @@ int main() {
     state.guiShader.uniform("color", glm::vec4(1));
 
     state.track = track;
+    auto result = state.track.mesh();
+    state.track_data = std::get<0>(result);
+    state.track_indices = std::get<1>(result);
+
+    const auto& first = state.track.getNodes().front();
+    car.position = first.position;
+    car.orientation = glm::quatLookAt(first.forward, first.tiltedUp);
 
     state.VAOs[0] = VAO::gen();
     state.VAOs[0].enableAttributeArray(0);
@@ -888,12 +885,12 @@ void render(GameState* state) {
     );
 
     state->rainbow_texture.bind();
-
+/*
     state->VBO1.data(
         sizeof(assets::mesh::PLANE), assets::mesh::PLANE, GL_STATIC_DRAW
     );
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, assets::indices::PLANE);
-
+*/
     transform = {
         car.position,
         car.scale,
@@ -933,14 +930,20 @@ void render(GameState* state) {
         state->wheel_mesh.draw(&state->pbrVBO);
     }
 
-    auto [dataa, indices] = state->track.mesh();
 
     state->white_texture.bind();
     state->pbrShaderProgram.uniform("MVP", projection * view);
-    state->pbrVBO.data(&dataa, GL_STATIC_DRAW);
+    state->pbrVBO.data(&state->track_data, GL_STATIC_DRAW);
+
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glFrontFace(GL_CCW);
+
     glDrawElements(
-        GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, indices.data()
+        GL_TRIANGLES, state->track_indices.size(), GL_UNSIGNED_INT, state->track_indices.data()
     );
+
+    glDisable(GL_CULL_FACE);
 
     drawRect(state, 1, 1, 2 + 12 + 9 * 8 + 1, 2 + 3 * 8 + 1, 0x5F000000);
 
